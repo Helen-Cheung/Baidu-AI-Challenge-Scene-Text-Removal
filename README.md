@@ -22,3 +22,59 @@ images 与 gts 中的图片根据图片名称一一对应。
 * 训练集: [下载](https://staticsns.cdn.bcebos.com/amis/2021-12/1639027952730/dehw_train_dataset.zip)
 * A榜测试集: [下载](https://staticsns.cdn.bcebos.com/amis/2021-12/1639027468553/dehw_testA_dataset.zip)
 * B榜测试集: [下载](https://staticsns.cdn.bcebos.com/amis/2022-1/1642677967477/dehw_testB_dataset.zip)
+
+## 数据预处理
+利用gt图生成训练图中的笔迹,并将笔迹转化为二值化mask供训练。
+```
+    src_image = cv2.imread(input_img[i])
+    gt_image = cv2.imread(gt_img[i])
+    diff_image = np.abs(src_image.astype(np.float32) - gt_image.astype(np.float32))
+    mean_image = np.mean(diff_image, axis=-1)
+    mask = np.greater(mean_image, threshold).astype(np.uint8)
+    mask = mask*255
+    mask = np.array([mask for i in range(3)]).transpose(1,2,0)
+```
+
+## 模型选择——PERT
+场景文本删除(STR)包含两个过程：文本定位和背景重建。现有方法存在两个问题：
+* 隐式擦除指导导致对非文本区域的过度擦除；
+* 单阶段擦除缺乏对文本区域的彻底去除。
+
+PERT模型的特点：1) 显式的文本擦除；2)平衡的多阶段文本擦除
+
+### 模型结构
+![image](https://user-images.githubusercontent.com/62683546/156002760-00e4dc5c-36b7-40a4-aacc-eef501a4b321.png)
+
+整体结构包含**Backbone(共享特征提取)、TLN(Mask生成分支)、BRN(填充图生成分支)、RegionMS(显式擦除)** 四个模块。
+
+#### TLN
+TLN模块中，为了生成强鲁棒的文本mask，有效融合多尺度的特征，引入了**PSPMoudle**。
+
+![PSP](https://user-images.githubusercontent.com/62683546/156004684-3c03128c-7d53-4f40-9056-4d0f56100d25.png)
+
+#### BRN
+BRN模块为了学习背景纹理的鲁棒重构规则，BRN模块引入了跳跃连接，来学习以下两种特征：
+* 对背景和前景纹理感知的低级纹理信息进行建模。
+* 捕获高级语义以增强特征表示增强。
+
+此外，为提升性能，在训练过程中，还构建了**多尺度重建模块(MRM)** 来预测多尺度擦除结果(P1输出和P2输出)。
+
+![image](https://user-images.githubusercontent.com/62683546/156004768-1942d4f4-9d6d-4a54-bb21-707c8d4ab9cb.png)
+
+#### RegionMS
+
+![image](https://user-images.githubusercontent.com/62683546/156005057-e2a2b790-2dc5-4681-8fae-b345fdf34ffe.png)
+
+#### 训练机制
+**迭代学习**:
+
+![image](https://user-images.githubusercontent.com/62683546/156004911-a578bdc3-bbde-4544-8575-b721e186c50a.png)
+
+**损失函数**:
+在Mask生成分支中，由于正反例像素点数量极不平衡，采用**Dice Loss**进行训练：
+
+![image](https://user-images.githubusercontent.com/62683546/156005372-18bfa675-b7cc-483d-b977-80a82a0f99cd.png)
+
+
+
+
